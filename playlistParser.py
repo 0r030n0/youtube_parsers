@@ -3,7 +3,7 @@ import requests, logging, json
 
 #USER CONFIG
 proxies = {
-	'https': '54.37.154.101:80', #you comment this line for disabling proxy
+	'https': '54.37.154.101:80', #you can comment this line for disabling proxy
 }
 
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 fileFMT = logging.Formatter(datefmt='%y-%m-%d %H:%M:%S', fmt='[%(asctime)s][%(module)s.py][%(funcName)s][%(levelname)s] %(message)s ')
 consoleFMT = logging.Formatter(datefmt='%y-%m-%d %H:%M:%S', fmt = '[%(asctime)s] %(message)s')
-file_handler = logging.FileHandler('./searchVideoParser.logs', mode='w')
+file_handler = logging.FileHandler('./playlistParser.logs', mode='w')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(fileFMT)
 stream_handler = logging.StreamHandler()
