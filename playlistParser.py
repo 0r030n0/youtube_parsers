@@ -26,13 +26,13 @@ class PlaylistParser:
 		"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.61 Safari/537.36",
 		'x-youtube-client-name': '1',
 		'x-youtube-client-version': '2.20200605.00.00',
-		'accept-language': 'en-US,en;q=0.9',
 		}
 		self.playlist_url = playlist_url
 		self.session = requests.Session()
 		self.result = {}
 		self.proxies = proxies
 		self.deleted = 0
+		self.playlistTitle = ''
 
 	def url_checker(self):
 		self.playlist_url = self.playlist_url.strip()
@@ -41,9 +41,8 @@ class PlaylistParser:
 			self.playlist_url = 'https://' + self.playlist_url
 
 	def get_first_page(self):
-		accept_language = {'accept-language': 'en-US,en;q=0.9'}
 		logger.debug('Requesting to YouTube to get first page')
-		page = self.session.get(self.playlist_url, headers=accept_language, proxies=self.proxies)
+		page = self.session.get(self.playlist_url, proxies=self.proxies)
 		if page.status_code != 200:
 			logger.debug('status code: ' + str(page.status_code))
 			page = self.get_first_page()
@@ -58,6 +57,8 @@ class PlaylistParser:
 		json_resp = json.loads(json_fragment)
 		playlist_info = json_resp['contents']['twoColumnBrowseResultsRenderer']['tabs'][0]['tabRenderer']['content']['sectionListRenderer']['contents'][0]['itemSectionRenderer']['contents'][0]['playlistVideoListRenderer']
 		contents = playlist_info['contents']
+		self.playlistTitle = json_resp['metadata']['playlistMetadataRenderer']['title']
+		logger.info('Playlist Title: ' + self.playlistTitle)
 		try:
 			continue_token = playlist_info['continuations'][0]['nextContinuationData']['continuation']
 		except:
@@ -138,12 +139,14 @@ class PlaylistParser:
 
 if __name__ == '__main__':
 	playlist_url = input('Enter playlist_url: ')
+
 	q = input('Do you want to see log file after executing? (y/n): ').strip().lower()
 	if q == 'y':
 		file_handler = logging.FileHandler('./playlistParser.logs', mode='w')
 		file_handler.setLevel(logging.DEBUG)
 		file_handler.setFormatter(fileFMT)
 		logger.addHandler(file_handler)
+
 	parser = PlaylistParser(playlist_url, proxies)
 	result = parser.start()
 	with open('playlistParser.csv', 'w') as f:
@@ -151,6 +154,7 @@ if __name__ == '__main__':
 		writer.writerow(['title', 'url', 'videoId', 'videoDuration(secs)'])
 		for videoId, videoData in result.items():
 			writer.writerow([videoData['title'], videoData['url'], videoId, videoData['duration']])
+			
 	while True:
 		q = input('Do you want to save urls to playlistVideos.txt? (y/n): ').strip().lower()
 		if q == 'y':
