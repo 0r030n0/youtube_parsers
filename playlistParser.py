@@ -1,24 +1,21 @@
-import requests, logging, json
+import requests, logging, json, re, csv
 
 
 #USER CONFIG
 proxies = {
-	'https': '54.37.154.101:80', #you can comment this line for disabling proxy
+	#'https': 'ip:port', #you comment this line for disabling proxy
 }
 
 
 #logger settings
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 fileFMT = logging.Formatter(datefmt='%y-%m-%d %H:%M:%S', fmt='[%(asctime)s][%(module)s.py][%(funcName)s][%(levelname)s] %(message)s ')
 consoleFMT = logging.Formatter(datefmt='%y-%m-%d %H:%M:%S', fmt = '[%(asctime)s] %(message)s')
-file_handler = logging.FileHandler('./playlistParser.logs', mode='w')
-file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(fileFMT)
 stream_handler = logging.StreamHandler()
 stream_handler.setLevel(logging.INFO)
 stream_handler.setFormatter(consoleFMT)
-logger.addHandler(file_handler)
 logger.addHandler(stream_handler)
 
 
@@ -33,7 +30,7 @@ class PlaylistParser:
 		}
 		self.playlist_url = playlist_url
 		self.session = requests.Session()
-		self.urls = []
+		self.result = {}
 		self.proxies = proxies
 		self.deleted = 0
 
@@ -48,30 +45,42 @@ class PlaylistParser:
 		logger.debug('Requesting to YouTube to get first page')
 		page = self.session.get(self.playlist_url, headers=accept_language, proxies=self.proxies)
 		if page.status_code != 200:
+			logger.debug('status code: ' + str(page.status_code))
 			page = self.get_first_page()
 		if 'pl-video' in page.text:
+			logger.debug('incorrect page format')
 			page = self.get_first_page()	
 		return page
 
 	def parse_first_page(self, page):
 		logger.debug('Playlist scraping')
-		json_fragment = page.split('window["ytInitialData"] = ')[1].split(';\n    window["ytInitialPlayerResponse"] = null;')[0]
+		json_fragment = re.findall(r'\{"responseContext".+"\}{3}', page)[0]
 		json_resp = json.loads(json_fragment)
 		playlist_info = json_resp['contents']['twoColumnBrowseResultsRenderer']['tabs'][0]['tabRenderer']['content']['sectionListRenderer']['contents'][0]['itemSectionRenderer']['contents'][0]['playlistVideoListRenderer']
 		contents = playlist_info['contents']
-
 		try:
 			continue_token = playlist_info['continuations'][0]['nextContinuationData']['continuation']
 		except:
 			continue_token = ''
 			logger.debug('continue token not found!')
+		self.parse_contents(contents)
 
+		return continue_token
+
+	def parse_contents(self, contents):
 		for content in contents:
 			videoId = content['playlistVideoRenderer']['videoId']
 			url = 'https://www.youtube.com/watch?v=' + videoId
-			self.urls.append(url)
-
-		return continue_token
+			if 'runs' in content['playlistVideoRenderer']['title'] or videoId in self.result:
+				self.deleted += 1
+				logger.debug(url + " was skipped. Perhaps it is private, deleted, duplicated or age restriction")
+			else:
+				videoTitle = content['playlistVideoRenderer']['title']['simpleText']
+				videoDuration = content['playlistVideoRenderer']['lengthSeconds']
+				self.result[videoId] = {}
+				self.result[videoId]['title'] = videoTitle
+				self.result[videoId]['url'] = url
+				self.result[videoId]['duration'] = videoDuration
 
 	def load_more(self, continue_token):
 		service = 'https://www.youtube.com/browse_ajax'
@@ -85,7 +94,6 @@ class PlaylistParser:
 			logger.debug('Failed to load new content. Trying again.')
 			r = self.session.post(service, params=params, headers=self.headers, proxies=self.proxies)
 		new_content = new_content.json()[1]
-
 		new_content_response = new_content['response']
 		pl_continuation = new_content_response["continuationContents"]["playlistVideoListContinuation"]
 		if "continuationContents" in new_content_response and "continuations" in pl_continuation:
@@ -96,16 +104,8 @@ class PlaylistParser:
 			logger.debug("continue_token wasn't found")
 		if "continuationContents" in new_content_response and "contents" in pl_continuation:
 			logger.debug('contents were found')
-			logger.debug('parsing contents')
-			for content in pl_continuation["contents"]:
-				url = 'https://www.youtube.com/watch?v=' + content['playlistVideoRenderer']['videoId']
-				if 'runs' in content['playlistVideoRenderer']['title']:
-					self.deleted += 1
-					logger.debug(url + " was skipped. Perhaps it is private, deleted or age restriction")
-				else:
-					self.urls.append(url)
-
-		logger.info('Current urls count: {}'.format(str(len(self.urls))))
+			self.parse_contents(pl_continuation['contents'])
+		logger.info('Current urls count: {}'.format(str(len(self.result))))
 		if continue_token != '':
 			self.load_more(continue_token)
 
@@ -121,13 +121,13 @@ class PlaylistParser:
 			page = self.get_first_page()
 			logger.info('Parsing first page')
 			continue_token = self.parse_first_page(page.text)
-			logger.info('Current urls count: {}'.format(str(len(self.urls))))
+			logger.info('Current urls count: {}'.format(str(len(self.result))))
 			if continue_token == '':
-				logger.info('All urls were received. Total/Passed/Skipped: {}/{}/{}'.format(str(len(self.urls) + self.deleted), str(len(self.urls)), str(self.deleted)))
+				logger.info('All urls were received. Total/Passed/Skipped: {}/{}/{}'.format(str(len(self.result) + self.deleted), str(len(self.result)), str(self.deleted)))
 			elif len(continue_token) == 80:
 				self.load_more(continue_token)
-				logger.info('All urls were received. Total/Passed/Skipped: {}/{}/{}'.format(str(len(self.urls) + self.deleted), str(len(self.urls)), str(self.deleted)))
-			return self.urls
+				logger.info('All urls were received. Total/Passed/Skipped: {}/{}/{}'.format(str(len(self.result) + self.deleted), str(len(self.result)), str(self.deleted)))
+			return self.result
 		except requests.exceptions.ProxyError:
 			logger.error('Proxy Error')
 			exit()
@@ -138,8 +138,27 @@ class PlaylistParser:
 
 if __name__ == '__main__':
 	playlist_url = input('Enter playlist_url: ')
+	q = input('Do you want to see log file after executing? (y/n): ').strip().lower()
+	if q == 'y':
+		file_handler = logging.FileHandler('./playlistParser.logs', mode='w')
+		file_handler.setLevel(logging.DEBUG)
+		file_handler.setFormatter(fileFMT)
+		logger.addHandler(file_handler)
 	parser = PlaylistParser(playlist_url, proxies)
-	urls = parser.start()
-	with open('playlistParser.txt', 'w') as f:
-		for url in urls:
-			f.write(url + '\n')
+	result = parser.start()
+	with open('playlistParser.csv', 'w') as f:
+		writer = csv.writer(f)
+		writer.writerow(['title', 'url', 'videoId', 'videoDuration(secs)'])
+		for videoId, videoData in result.items():
+			writer.writerow([videoData['title'], videoData['url'], videoId, videoData['duration']])
+	while True:
+		q = input('Do you want to save urls to playlistVideos.txt? (y/n): ').strip().lower()
+		if q == 'y':
+			with open('playlistVideos.txt', 'w') as f:
+				for videoData in result.values():
+					f.write(videoData['url'] + '\n')
+			exit()
+		elif q == 'n':
+			exit()
+		else:
+			pass
