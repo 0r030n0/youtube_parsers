@@ -58,7 +58,7 @@ class SearchParser:
 		needReturn = False
 		###########ANTI AD###########
 		itemSection = 0
-		content_types = ['channelRenderer', 'playlistRenderer', 'movieRenderer', 'videoRenderer', 'messageRenderer', 'radioRenderer', 'horizontalCardListRenderer']
+		content_types = ['channelRenderer', 'playlistRenderer', 'movieRenderer', 'videoRenderer', 'messageRenderer', 'radioRenderer', 'horizontalCardListRenderer', 'shelfRenderer']
 		contents_found = False
 		while True:
 			section = contents[itemSection]
